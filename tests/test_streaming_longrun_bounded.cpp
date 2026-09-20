@@ -2,6 +2,7 @@
 #include "streaming.hpp"
 #include "audio_io.hpp"
 #include "tokenizer.hpp"
+#include "stream_clips.hpp" // pktest::repeated_session_clip
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -58,16 +59,7 @@ int main() {
         return 1;
     }
 
-    // Build a long continuous session: the clip repeated `repeats` times, each
-    // separated by 0.6 s of silence so an <EOU> fires between utterances (the
-    // accumulated buffers are NOT reset on <EOU>, which is exactly the bug).
-    std::vector<float> gap((size_t)(0.6f * 16000.0f), 0.0f);
-    std::vector<float> pcm;
-    pcm.reserve((a.samples.size() + gap.size()) * (size_t)repeats);
-    for (int i = 0; i < repeats; ++i) {
-        pcm.insert(pcm.end(), a.samples.begin(), a.samples.end());
-        pcm.insert(pcm.end(), gap.begin(), gap.end());
-    }
+    const std::vector<float> pcm = pktest::repeated_session_clip(a.samples, repeats);
 
     pk::StreamingSession sess(m->loader(), target_lang);
     sess.reset_instrumentation();

@@ -1,7 +1,9 @@
 #include "parakeet_capi.h"
+#include "parakeet_capi_test.hpp"  // per-stream mel-window diagnostics
 #include "model.hpp"        // pk::Model
 #include "streaming.hpp"    // pk::StreamingSession, pk::run_stream_over_pcm
 #include "audio_io.hpp"     // pk::load_audio_16k_mono (test links the parakeet lib)
+#include "stream_clips.hpp" // pktest::repeated_session_clip
 
 #include <cstdio>
 #include <cstdlib>
@@ -43,27 +45,7 @@
 //   PARAKEET_TEST_STREAM_LANG    language prompt for prompt models (default "")
 //   PARAKEET_TEST_STREAM_REPEATS repeats in the LONG session (default 24)
 
-// Test-only diagnostics exported by src/parakeet_capi.cpp. Deliberately not in
-// parakeet_capi.h: they are a regression-test seam, not part of the ABI.
-extern "C" void parakeet_capi_test_mel_reset_stats(void);
-extern "C" unsigned long long parakeet_capi_test_mel_max_copy(void);
-extern "C" unsigned long long parakeet_capi_test_mel_max_frames_held(void);
-
 namespace {
-
-// The clip repeated `repeats` times with 0.6 s of silence between passes, so an
-// <EOU> fires between utterances -- a continuous dictation session, which is
-// exactly the shape that never resets the accumulated buffers.
-std::vector<float> long_session_pcm(const std::vector<float>& clip, int repeats) {
-    const std::vector<float> gap((size_t)(0.6f * 16000.0f), 0.0f);
-    std::vector<float> pcm;
-    pcm.reserve((clip.size() + gap.size()) * (size_t)repeats);
-    for (int i = 0; i < repeats; ++i) {
-        pcm.insert(pcm.end(), clip.begin(), clip.end());
-        pcm.insert(pcm.end(), gap.begin(), gap.end());
-    }
-    return pcm;
-}
 
 // Take ownership of a char* the C-API malloc'd, as a std::string.
 std::string take(char* p) {
@@ -91,7 +73,6 @@ RunStats run_capi(parakeet_ctx* ctx, const std::vector<float>& pcm,
                      parakeet_capi_last_error(ctx));
         return r;
     }
-    parakeet_capi_test_mel_reset_stats();
 
     const int chunk = 16000 * 80 / 1000;
     std::string text;
@@ -116,8 +97,8 @@ RunStats run_capi(parakeet_ctx* ctx, const std::vector<float>& pcm,
     text += take(tail);
 
     r.text     = text;
-    r.max_copy = parakeet_capi_test_mel_max_copy();
-    r.max_held = parakeet_capi_test_mel_max_frames_held();
+    r.max_copy = parakeet_capi_test_mel_max_copy(st);
+    r.max_held = parakeet_capi_test_mel_max_frames_held(st);
     r.ok       = true;
     parakeet_capi_stream_free(st);
     return r;
@@ -151,8 +132,8 @@ int main() {
     parakeet_ctx* ctx = parakeet_capi_load(gguf);
     if (!ctx) { std::fprintf(stderr, "[melbound] load failed %s\n", gguf); return 1; }
 
-    const std::vector<float> pcm_short = long_session_pcm(a.samples, short_repeats);
-    const std::vector<float> pcm_long  = long_session_pcm(a.samples, long_repeats);
+    const std::vector<float> pcm_short = pktest::repeated_session_clip(a.samples, short_repeats);
+    const std::vector<float> pcm_long  = pktest::repeated_session_clip(a.samples, long_repeats);
 
     const RunStats s_short = run_capi(ctx, pcm_short, target_lang);
     const RunStats s_long  = run_capi(ctx, pcm_long,  target_lang);
